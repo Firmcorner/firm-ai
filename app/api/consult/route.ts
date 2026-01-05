@@ -3,7 +3,7 @@ import { generateText } from "ai"
 
 export async function POST(req: Request) {
   try {
-    const { companyName, businessType, query } = await req.json()
+    const { companyName, businessType, query, dateTime } = await req.json()
 
     console.log("[v0] OPENAI_API_KEY exists:", !!process.env.OPENAI_API_KEY)
 
@@ -45,6 +45,21 @@ Please provide detailed, actionable advice for this business. Include specific s
       maxTokens: 1000,
     })
 
+    // Save to Google Sheets (non-blocking)
+    saveToGoogleSheets({
+      companyName,
+      businessType,
+      query,
+      dateTime: dateTime || new Date().toLocaleString('en-US', {
+        timeZone: 'Asia/Dubai',
+        dateStyle: 'medium',
+        timeStyle: 'medium'
+      }),
+      response: text,
+    }).catch(error => {
+      console.error('[v0] Failed to save to Google Sheets:', error);
+    });
+
     return Response.json({ response: text })
   } catch (error) {
     console.error("[v0] Error in consult API:", error)
@@ -57,5 +72,44 @@ Please provide detailed, actionable advice for this business. Include specific s
       },
       { status: 500 },
     )
+  }
+}
+
+async function saveToGoogleSheets(data: {
+  companyName: string;
+  businessType: string;
+  query: string;
+  dateTime: string;
+  response: string;
+}) {
+  try {
+    const appsScriptUrl = process.env.GOOGLE_APPS_SCRIPT_URL;
+    
+    if (!appsScriptUrl) {
+      console.warn('[v0] GOOGLE_APPS_SCRIPT_URL not configured - skipping Google Sheets save');
+      return;
+    }
+
+    console.log('[v0] Saving to Google Sheets...');
+
+    const response = await fetch(appsScriptUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    console.log('Response',response)
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Apps Script returned ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('[v0] Successfully saved to Google Sheets:', result);
+  } catch (error) {
+    console.error('[v0] Error saving to Google Sheets:', error);
+    // Don't throw error - we don't want to fail the request if sheets fails
   }
 }
